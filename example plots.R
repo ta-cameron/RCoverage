@@ -52,7 +52,7 @@
 # maxTLEN                 [600]  #sets maxTLEN cutoff value when filtering 
 
 RCoverage(dataDir="example/bam", outDir="example/coverage", TPM=T, 
-          inferExperiments=T, gffFile="example/reference/example.gff", strandMode=0, paired=F,
+          inferExperiments=T, gffFile="example/reference/mini-NC_000913.3.gff", strandMode=0, paired=F,
           countSinglets=F, onlyProperPairFragments=T,
           filter=T, maxTLEN=600)
 
@@ -102,45 +102,201 @@ RCoverage(dataDir="example/bam", outDir="example/coverage", TPM=T,
 ## textScaling = [1] text scaling factor. 
 #                Proportionally scales all text, as well as the size of the gene track and group label background
 
+
+
+#### ftsZ ####
+
+#Lets start simple.
+# We will define a strain list with one group of two tracks. 
+# Tracks grouped together are scaled together, so organization is important.
+# Each track is a list of bigwig coverage files for a set of replicates.
+# Each group is a list of individual track lists.
+# The strain list is just a list of individual group lists.
+#
+# Note: I designed this with TPM-normalized coverage tracks in mind. Keep in mind that the coverage
+#       of all the replicates is averaged... this makes the most sense to me with normalized data.
+#       If you want to use counts instead, then simply use the count bigwig files below.
+
 strains <- list(
-  "group 1"=list(
-    "ex1"=list.files("example/coverage/TPM", pattern="^ex1", ignore.case=T, full.names = T),
-    "ex2"=list.files("example/coverage/TPM", pattern="^ex2", ignore.case=T, full.names = T)
-  ),
-  "group 2"=list(
-    "ex2"=list.files("example/coverage/TPM", pattern="^ex2", ignore.case=T, full.names = T)
+  "mRNA"=list(
+    "WT"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
+    "pnp"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
   )
 )
 
-#assign attributes to list elements (optional)
-attributes(strains$'group 1'$ex2)$RCov.strainFontFace <- "italic"
-attributes(strains$'group 2'$ex2)$RCov.strainFontFace <- "italic"
-attributes(strains$'group 2'$ex2)$RCov.strandRequest <- "+" #either of "+", "-", or "*"
-
-#review attribute settings:
-rapply(strains,attributes)
-
-#palette=c("grey10","darkred","grey10","darkred")
+#Set the dimensions of the output graph
+# Due to some limitations, various calculations for the final graph are not updated if you re-size it later
+# It is best to define the size you want and have everything done correctly to the intended size.
 width <- 4
 height <- 2
-labelGroups <- T
 
-#### ftsZ ####
-rna <- "ftsZ"
+#Next define the region and srand to be graphed
+# For convenience, here the ompX locus is used to set the left and right window coordinates and the strand
+# this can be done manually of course as well
+rna <- "ompX"
 exons[exons$locus == rna,]
 
-target <- GRanges(seqname="NC_008533.1", 
+target <- GRanges(seqname="NC_000913.3", 
                   ranges=IRanges(
-                    start = exons[exons$locus == rna,]$left-100, 
-                    end = exons[exons$locus == rna,]$right+5000 ), 
+                    start = exons[exons$locus == rna,]$left-3300, 
+                    end = exons[exons$locus == rna,]$right+500 ), 
                   strand=exons[exons$locus == rna,]$strand )
 
-#quartz for plotting to independent window; mac only:
-quartz(width=width,height=height)
+#for plotting to independent window with a defined size, first make the device
+dev.new(width=width,height=height, unit="in", noRStudioGD = T)
 
-plotStacked(target = target, strains = strains, palette = palette, labelGroups=labelGroups, height = height, width = width)
+#then run plotStacked to draw the graph
+plotStacked(target = target, strains = strains, labelGroups=T, height = height, width = width)
 
 #to save a png:
+# there can be PDF rendering issues on some platforms (macs, at least) if you choose PDF output
+# a decently high-resolution png works well however
 png(paste0("example/coverage - ",rna,".png"),width=width, height=height, units="in", res=300)
 plotStacked(target = target, strains = strains, palette=palette, labelGroups=labelGroups, height = height, width = width)
 dev.off()
+
+
+#What if we want something more complicated?
+# How about three groups of two tracks with manually specified strands
+strains <- list(
+  "plus"=list(
+    "WT"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
+    "pnp"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
+  ),
+  "minus"=list(
+    "WT"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
+    "pnp"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
+  ),
+  "all"=list(
+    "WT"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
+    "pnp"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
+  )
+)
+
+#Assign attributes to list elements (optional)
+# You can set two attributes at any level of the strain list. These will be propogated downwards to
+# all sub elements. However, an attribute at the group level will be overwriten by any attribute
+# manually set at the track level.
+#
+# Currently two attributes can be set:
+#    RCov.strainFontFace : generally R supports "italic", "bold", "plain", "bold-italic"
+#    RCov.strandRequest : set to either of "+", "-", or "*"
+
+attributes(strains$'minus')$RCov.strandRequest <- "-"
+attributes(strains$'all')$RCov.strandRequest <- "*"
+
+#might as well set our pnp track names italic as well:
+attributes(strains$'plus'$pnp)$RCov.strainFontFace <- "italic"
+attributes(strains$'minus'$pnp)$RCov.strainFontFace <- "italic"
+attributes(strains$'all'$pnp)$RCov.strainFontFace <- "italic"
+
+#review attribute settings:
+rapply(strains, attributes, how="replace")
+
+#set new dimensions
+width <- 4
+height <- 3
+
+#then run plotStacked to draw the graph
+dev.new(width=width,height=height, unit="in", noRStudioGD = T)
+plotStacked(target = target, strains = strains, labelGroups=T, height = height, width = width)
+
+
+
+#### SecA ####
+
+#secA will be used in the following examples
+rna <- "secA"
+exons[exons$locus == rna,]
+
+target <- GRanges(seqname="NC_000913.3", 
+                  ranges=IRanges(
+                    start = exons[exons$locus == rna,]$left-2000, 
+                    end = exons[exons$locus == rna,]$right+1700 ), 
+                  strand=exons[exons$locus == rna,]$strand )
+
+#define a custom color palette as well
+palette=c("grey10","darkred","grey10","darkred")
+
+###Group names don't have to be shown. In this case, strain names will be on the left
+# first organize our tracks:
+strains <- list(
+  "group 1"=list(
+    "WT +"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
+    "WT -"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T)
+  ),
+  "group 2"=list(
+    "pnp +"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T),
+    "pnp -"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
+  )
+)
+
+#assign attributes once again
+attributes(strains$'group 2')$RCov.strainFontFace <- "italic"
+attributes(strains$'group 1'$'WT -')$RCov.strandRequest <- "-"
+attributes(strains$'group 2'$'pnp -')$RCov.strandRequest <- "-"
+
+#review attribute settings:
+rapply(strains, attributes, how="replace")
+
+#run plotStacked to draw the graph
+quartz(width=width,height=height)
+plotStacked(target = target, strains = strains, palette = palette, labelGroups=F, height = height, width = width)
+
+
+
+###Single tracks per group also works just fine
+strains <- list(
+  "group 1"=list(
+    "WT +"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T)
+  ),
+  "group 2"=list(
+    "WT -"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T)
+  ),
+  "group 3"=list(
+    "pnp +"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
+  ),
+  "group 4"=list(
+    "pnp -"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
+  )
+)
+
+
+#assign attributes once again
+attributes(strains$'group 3')$RCov.strainFontFace <- "italic"
+attributes(strains$'group 4')$RCov.strainFontFace <- "italic"
+attributes(strains$'group 2'$'WT -')$RCov.strandRequest <- "-"
+attributes(strains$'group 4'$'pnp -')$RCov.strandRequest <- "-"
+
+#review attribute settings:
+rapply(strains, attributes, how="replace")
+
+#run plotStacked to draw the graph
+quartz(width=width,height=height)
+plotStacked(target = target, strains = strains, palette = palette, labelGroups=F, height = height, width = width)
+
+
+
+###One group with many tracks is also fine
+strains <- list(
+  "group 1"=list(
+    "WT +"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
+    "WT -"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
+    "pnp +"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T),
+    "pnp -"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
+  )
+)
+
+
+#assign attributes once again
+attributes(strains$'group 1'$'pnp +')$RCov.strainFontFace <- "italic"
+attributes(strains$'group 1'$'pnp -')$RCov.strainFontFace <- "italic"
+attributes(strains$'group 1'$'WT -')$RCov.strandRequest <- "-"
+attributes(strains$'group 1'$'pnp -')$RCov.strandRequest <- "-"
+
+#review attribute settings:
+rapply(strains, attributes, how="replace")
+
+#run plotStacked to draw the graph
+quartz(width=width,height=height)
+plotStacked(target = target, strains = strains, palette = palette, labelGroups=F, height = height, width = width)

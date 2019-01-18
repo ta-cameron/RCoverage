@@ -18,7 +18,7 @@ ipak <- function(pkg){ #ipak from stevenworthington / GitHub
 }
 ipak(packages); rm(packages,ipak)
 
-
+#RCoverage function
 RCoverage <- function(dataDir=NULL, outDir=NULL, TPM=T, 
                       gffFile=NULL, inferExperiments=T, strandMode=0, paired=F,
                       countSinglets=F, onlyProperPairFragments=T,
@@ -325,10 +325,11 @@ RCoverage <- function(dataDir=NULL, outDir=NULL, TPM=T,
 
 
 #strandedness / paired determination function
+# this can be used independently of the other functions to example a bam file of your choice
+# simply give it the file path and the gff file path
 inferExperiment <- function(file, gffFile=NULL, sampleSize=200000, substituteChromosomeNames=NULL){
   
   #### import gff file ####
-  #gffFile <- "example/reference/example.gff"
   tryCatch( exonsGR <- import(gffFile),
             error=function(e) stop("Error importing genome reference file: ",gffFile,"\n\t",e[1])
   )
