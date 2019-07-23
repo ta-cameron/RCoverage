@@ -18,6 +18,154 @@ ipak <- function(pkg){ #ipak from stevenworthington / GitHub
 }
 ipak(packages); rm(packages,ipak)
 
+#inferExperiment
+# strandedness / paired determination function
+# this can be used independently of the other functions to example a bam file of your choice
+# simply give it the file path and the gff file path
+inferExperiment <- function(file, gffFile=NULL, sampleSize=200000, substituteChromosomeNames=NULL){
+  
+  ### import gff file ###
+  tryCatch( exonsGR <- import(gffFile),
+            error=function(e) stop("Error importing genome reference file: ",gffFile,"\n\t",e[1])
+  )
+  exonsGR <- exonsGR[exonsGR$type =="gene"]
+  exonsGR <- exonsGR[,c("gene_biotype","Name")]
+  exonsGRStrands <- split(exonsGR, strand(exonsGR))
+  rm(exonsGR)
+  
+  cat("========= Start of inferExperiment =========\n")
+  
+  #check dependencies
+  tryCatch( library("Rsamtools", "GenomicFiles", "GenomicAlignments"),
+            error = function(e) stop("Required packages not installed: ",e[1]) )
+  
+  #warn on small sample size
+  if(sampleSize < 1000){
+    cat("\x1b[33mSample size is less than 1000... results may be unreliable.\n\x1b[0m")
+    Sys.sleep(2)
+  }
+  
+  #set up bam file sampling
+  bam <- BamFile(file, yieldSize=1000000)
+  yield <- function(x) {
+    readGAlignments(x, param=ScanBamParam(what="flag", flag = scanBamFlag(isUnmappedQuery=F)) )
+  }
+  map <- identity
+  #sample reads
+  subBAM <- reduceByYield(bam, yield, map, REDUCEsampler(sampleSize, TRUE))
+  
+  #replace unwanted chromosome names
+  if( exists("substituteChromosomeNames") && !is.null(substituteChromosomeNames) ){
+    if( !is.data.frame(substituteChromosomeNames) || ncol(substituteChromosomeNames) != 2 ){
+      stop("Please supply a data.frame, where the first column is the query and the second column the replacement")
+    }
+    
+    subBAMseq <- seqlevels(subBAM)
+    #substitute genome names
+    names(substituteChromosomeNames) <- c("original","replacement")
+    for(subID in 1:nrow(substituteChromosomeNames) ){
+      subBAMseq[grepl(substituteChromosomeNames$original[subID],subBAMseq)] <- as.character(substituteChromosomeNames$replacement[subID])
+    }
+    subBAM <- renameSeqlevels(subBAM, subBAMseq)  
+  }
+  #check for non-unique chromosome names now
+  if( length(seqlevels(exonsGRStrands)) != length(unique(seqlevels(exonsGRStrands))) ){
+    stop("non-unique chromosome names!",
+         "\n\t names: ",toString(idx$chr))
+  }
+  #check for matching chromosome names now
+  if(!all(seqlevels(exonsGRStrands) %in% seqlevels(subBAM)) ){
+    stop("chromosome names in annotation file are missing from BAM file:",
+         "\n\t annotation: ",toString(seqlevels(exonsGRStrands)),
+         "\n\t   BAM file: ",toString(seqlevels(subBAM)) )
+  }
+  
+  #split by read order (first / second)
+  #also determine here if reads contain pairs
+  subBAMOrder <- split(subBAM, bamFlagTest(subBAM@elementMetadata$flag, "isFirstMateRead"))
+  switch( length(names(subBAMOrder)), 
+          { names(subBAMOrder) <- c("first") ; paired <- F },
+          { names(subBAMOrder) <- c("second","first") ; paired <- T }
+  )
+  
+  #prepare table of results
+  strandTable <- data.frame(
+    hits=rep(0,4),
+    row.names=c("forward","reverse","unknown","total")
+  )
+  
+  for(readOrder in names(subBAMOrder)){
+    #readOrder <- names(subBAMOrder)[1]
+    #split by strand of read
+    subBAMStrands <- split(subBAMOrder[[readOrder]], strand(subBAMOrder[[readOrder]]))
+    
+    switch(readOrder,
+           first={
+             forwardCount <- "forward"
+             reverseCount <- "reverse"
+           },
+           second={
+             forwardCount <- "reverse"
+             reverseCount <- "forward"
+           })
+    
+    strandTable["total","hits"] <- strandTable["total","hits"] + length(subBAMStrands$'+') + length(subBAMStrands$'-')
+    strandTable[forwardCount,"hits"] <- strandTable[forwardCount,"hits"] + 
+      length( na.omit(findOverlaps(subBAMStrands$'+',exonsGRStrands$'+', ignore.strand=T, select="arbitrary") )) +
+      length( na.omit(findOverlaps(subBAMStrands$'-',exonsGRStrands$'-', ignore.strand=T, select="arbitrary") ))
+    strandTable[reverseCount,"hits"] <- strandTable[reverseCount,"hits"] +
+      length( na.omit(findOverlaps(subBAMStrands$'+',exonsGRStrands$'-', ignore.strand=T, select="arbitrary") )) +
+      length( na.omit(findOverlaps(subBAMStrands$'-',exonsGRStrands$'+', ignore.strand=T, select="arbitrary") ))
+  }
+  #number of reads over no genes
+  #this is taken as the total number of reads minus the number of forward and reverse hits
+  #technically this can be a negative number if there are many ambiguous reads
+  #this is not a measure of ambiguous reads, but reflects the number of reads that could not be considered
+  strandTable["unknown","hits"] <- strandTable["total","hits"]-sum(strandTable[c("forward","reverse"),"hits"])
+  if(strandTable["unknown","hits"] < 0 ){
+    strandTable["unknown","hits"] <- 0
+  }
+  
+  #percent of reads mapping to gene
+  strandTable$percent <- round(strandTable$hits/strandTable["total","hits"]*100, 1)
+  
+  #report some suspicious scenarios
+  if(sum(strandTable[c("forward","reverse"),"hits"]) < strandTable["unknown","hits"] ){
+    cat("\x1b[33mWarning: More than half of all reads were not assigned to genes. Is the annotation correct?\n\x1b[0m")
+    Sys.sleep(5)
+  }
+  if(sum(strandTable[c("forward","reverse"),"hits"]) < 100){
+    cat("\x1b[33mWarning: Less than 100 reads total were assigned to genes... this may not produce reliable results.\n\x1b[0m")
+    Sys.sleep(5)
+  }
+  
+  cat("Summary Table:\n")
+  print(strandTable)
+  
+  #report support for 
+  forward <- round(strandTable["forward","hits"] / sum(strandTable[c("forward","reverse"),"hits"]) *100,1)
+  reverse <- round(strandTable["reverse","hits"] / sum(strandTable[c("forward","reverse"),"hits"]) *100,1)
+  cat(sep="", "\nForward: ",forward,"% of reads mapped to genes support forward strand. (",strandTable["forward","percent"],"% map to a gene if forward-stranded)\n")
+  cat(sep="", "Reverse: ",reverse,"% of reads mapped to genes support reverse strand. (",strandTable["reverse","percent"],"% map to a gene if reverse-stranded)\n\n")
+  
+  if( forward == reverse || abs(log(forward/reverse,2)) <= 2 ){
+    #unstranded (the cutoff for unstranded accepts 20 - 80% on each strand) 80/20 = ratio of 4, hence log(4,2)==2 as cutoff
+    strandMode <- 0
+    cat("Final determination:\n\t-----> unstranded (0) <-----\n")
+  } else if( log(forward/reverse,2) > 2 ){
+    #forward stranded (first read on forward strand)
+    strandMode <- 1
+    cat("Final determination:\n\t-----> forward stranded (1) <-----\n")
+  } else {
+    #reverse stranded (first read on reverse strand)
+    strandMode <- 2
+    cat("Final determination:\n\t-----> reverse stranded (2) <-----\n")
+  }
+  cat("\n========= End of inferExperiment =========\n\n")
+  return(list("paired"=paired, "strandMode"=strandMode))
+}  
+
+
 #RCoverage function
 RCoverage <- function(dataDir=NULL, outDir=NULL, TPM=T, 
                       gffFile=NULL, inferExperiments=T, strandMode=0, paired=F,
@@ -71,7 +219,7 @@ RCoverage <- function(dataDir=NULL, outDir=NULL, TPM=T,
   #here begins the actual evaluation:
   #capture.output(file=paste0(outDir,"RbedToolsCoverage.log"), split=T, {
     
-    ####### coverage loop #######
+    ### coverage loop ###
     files <- list.files(path=dataDir, pattern="\\.bam$", ignore.case=T)
     files <- sub("^",dataDir,files)
     for(file in files){
@@ -133,7 +281,11 @@ RCoverage <- function(dataDir=NULL, outDir=NULL, TPM=T,
       
       #import reads
       cat("\n  Importing read information (readGAlignments / readGAlignmentsPairs)\n")
-      if(paired){cat("    ETA ~", round(mappedReads/1000000*12/60,1),"minutes.\n")}
+      if(exists("last_time_per_mapped")){
+        cat("    ETA ~", round(last_time_per_mapped * mappedReads / 60,1),"minutes.\n")
+      } else {
+        cat("    ETA unknown.\n")
+      }
       
       #import unpaired reads
       flags <- scanBamFlag(isDuplicate = F,
@@ -319,154 +471,11 @@ RCoverage <- function(dataDir=NULL, outDir=NULL, TPM=T,
       
       cat("\nSystem stats:\n")
       print.table(proc.time() - ptm)
+      last_time <- (proc.time() - ptm)["elapsed"]
+      last_time_per_mapped <- last_time / mappedReads
     }
 #  })
 }
-
-
-#strandedness / paired determination function
-# this can be used independently of the other functions to example a bam file of your choice
-# simply give it the file path and the gff file path
-inferExperiment <- function(file, gffFile=NULL, sampleSize=200000, substituteChromosomeNames=NULL){
-  
-  #### import gff file ####
-  tryCatch( exonsGR <- import(gffFile),
-            error=function(e) stop("Error importing genome reference file: ",gffFile,"\n\t",e[1])
-  )
-  exonsGR <- exonsGR[exonsGR$type =="gene"]
-  exonsGR <- exonsGR[,c("gene_biotype","Name")]
-  exonsGRStrands <- split(exonsGR, strand(exonsGR))
-  rm(exonsGR)
-  
-  cat("========= Start of inferExperiment =========\n")
-  
-  #check dependencies
-  tryCatch( library("Rsamtools", "GenomicFiles", "GenomicAlignments"),
-            error = function(e) stop("Required packages not installed: ",e[1]) )
-  
-  #warn on small sample size
-  if(sampleSize < 1000){
-    cat("\x1b[33mSample size is less than 1000... results may be unreliable.\n\x1b[0m")
-  }
-  
-  #set up bam file sampling
-  bam <- BamFile(file, yieldSize=1000000)
-  yield <- function(x) {
-    readGAlignments(x, param=ScanBamParam(what="flag", flag = scanBamFlag(isUnmappedQuery=F)) )
-  }
-  map <- identity
-  #sample reads
-  subBAM <- reduceByYield(bam, yield, map, REDUCEsampler(sampleSize, TRUE))
-  
-  #replace unwanted chromosome names
-  if( exists("substituteChromosomeNames") && !is.null(substituteChromosomeNames) ){
-    if( !is.data.frame(substituteChromosomeNames) || ncol(substituteChromosomeNames) != 2 ){
-      stop("Please supply a data.frame, where the first column is the query and the second column the replacement")
-    }
-    
-    subBAMseq <- seqlevels(subBAM)
-    #substitute genome names
-    names(substituteChromosomeNames) <- c("original","replacement")
-    for(subID in 1:nrow(substituteChromosomeNames) ){
-      subBAMseq[grepl(substituteChromosomeNames$original[subID],subBAMseq)] <- as.character(substituteChromosomeNames$replacement[subID])
-    }
-    subBAM <- renameSeqlevels(subBAM, subBAMseq)  
-  }
-  #check for non-unique chromosome names now
-  if( length(seqlevels(exonsGRStrands)) != length(unique(seqlevels(exonsGRStrands))) ){
-    stop("non-unique chromosome names!",
-         "\n\t names: ",toString(idx$chr))
-  }
-  #check for matching chromosome names now
-  if(!all(seqlevels(exonsGRStrands) %in% seqlevels(subBAM)) ){
-    stop("chromosome names in annotation file are missing from BAM file:",
-         "\n\t annotation: ",toString(seqlevels(exonsGRStrands)),
-         "\n\t   BAM file: ",toString(seqlevels(subBAM)) )
-  }
-  
-  #split by read order (first / second)
-  #also determine here if reads contain pairs
-  subBAMOrder <- split(subBAM, bamFlagTest(subBAM@elementMetadata$flag, "isFirstMateRead"))
-  switch( length(names(subBAMOrder)), 
-          { names(subBAMOrder) <- c("first") ; paired <- F },
-          { names(subBAMOrder) <- c("second","first") ; paired <- T }
-  )
-  
-  #prepare table of results
-  strandTable <- data.frame(
-    hits=rep(0,4),
-    row.names=c("forward","reverse","unknown","total")
-  )
-  
-  for(readOrder in names(subBAMOrder)){
-    #readOrder <- names(subBAMOrder)[1]
-    #split by strand of read
-    subBAMStrands <- split(subBAMOrder[[readOrder]], strand(subBAMOrder[[readOrder]]))
-    
-    switch(readOrder,
-           first={
-             forwardCount <- "forward"
-             reverseCount <- "reverse"
-           },
-           second={
-             forwardCount <- "reverse"
-             reverseCount <- "forward"
-           })
-    
-    strandTable["total","hits"] <- strandTable["total","hits"] + length(subBAMStrands$'+') + length(subBAMStrands$'-')
-    strandTable[forwardCount,"hits"] <- strandTable[forwardCount,"hits"] + 
-      length( na.omit(findOverlaps(subBAMStrands$'+',exonsGRStrands$'+', ignore.strand=T, select="arbitrary") )) +
-      length( na.omit(findOverlaps(subBAMStrands$'-',exonsGRStrands$'-', ignore.strand=T, select="arbitrary") ))
-    strandTable[reverseCount,"hits"] <- strandTable[reverseCount,"hits"] +
-      length( na.omit(findOverlaps(subBAMStrands$'+',exonsGRStrands$'-', ignore.strand=T, select="arbitrary") )) +
-      length( na.omit(findOverlaps(subBAMStrands$'-',exonsGRStrands$'+', ignore.strand=T, select="arbitrary") ))
-  }
-  #number of reads over no genes
-  #this is taken as the total number of reads minus the number of forward and reverse hits
-  #technically this can be a negative number if there are many ambiguous reads
-  #this is not a measure of ambiguous reads, but reflects the number of reads that could not be considered
-  strandTable["unknown","hits"] <- strandTable["total","hits"]-sum(strandTable[c("forward","reverse"),"hits"])
-  if(strandTable["unknown","hits"] < 0 ){
-    strandTable["unknown","hits"] <- 0
-  }
-  
-  #percent of reads mapping to gene
-  strandTable$percent <- round(strandTable$hits/strandTable["total","hits"]*100, 1)
-  
-  #report some suspicious scenarios
-  if(sum(strandTable[c("forward","reverse"),"hits"]) < strandTable["unknown","hits"] ){
-    cat("\x1b[33mWarning: More than half of all reads were not assigned to genes. Is the annotation correct?\n\x1b[0m")
-    stop("Please review gene annotations for missing plasmids, chromosomes, etc.")
-  }
-  if(sum(strandTable[c("forward","reverse"),"hits"]) < 100){
-    cat("\x1b[33mWarning: Less than 100 reads total were assigned to genes... this may not produce reliable results.\n\x1b[0m")
-  }
-  
-  cat("Summary Table:\n")
-  print(strandTable)
-  
-  #report support for 
-  forward <- round(strandTable["forward","hits"] / sum(strandTable[c("forward","reverse"),"hits"]) *100,1)
-  reverse <- round(strandTable["reverse","hits"] / sum(strandTable[c("forward","reverse"),"hits"]) *100,1)
-  cat(sep="", "\nForward: ",forward,"% of reads mapped to genes support forward strand. (",strandTable["forward","percent"],"% map to a gene if forward-stranded)\n")
-  cat(sep="", "Reverse: ",reverse,"% of reads mapped to genes support reverse strand. (",strandTable["reverse","percent"],"% map to a gene if reverse-stranded)\n\n")
-  
-  if( forward == reverse || abs(log(forward/reverse,2)) <= 2 ){
-    #unstranded (the cutoff for unstranded accepts 20 - 80% on each strand) 80/20 = ratio of 4, hence log(4,2)==2 as cutoff
-    strandMode <- 0
-    cat("Final determination:\n\t-----> unstranded (0) <-----\n")
-  } else if( log(forward/reverse,2) > 2 ){
-    #forward stranded (first read on forward strand)
-    strandMode <- 1
-    cat("Final determination:\n\t-----> forward stranded (1) <-----\n")
-  } else {
-    #reverse stranded (first read on reverse strand)
-    strandMode <- 2
-    cat("Final determination:\n\t-----> reverse stranded (2) <-----\n")
-  }
-  cat("\n========= End of inferExperiment =========\n\n")
-  return(list("paired"=paired, "strandMode"=strandMode))
-}  
 
 
 ### stacked coverage graphing - main
@@ -1041,3 +1050,4 @@ extractCov <- function(left,right,strands,chromosome,binsPerInch){
   }
   return(dataReps)
 }
+

@@ -27,12 +27,13 @@
 # 4) improve accuracy inferExperiment 'unknown type' output statistics
 # 5) account for CIGAR strings properly
 
+
 #### 0) load functions in the RCoverage file first ####
 # Run entire RCoverage file. 
 # Ensure ALL packages are installed.
 
-#### 1) calculate coverage ####
 
+#### 1) calculate coverage ####
 # #basic settings:
 # dataDir [NULL] #relative path to the location of the bam files
 # outDir  [NULL] #relative path to output folder
@@ -74,7 +75,6 @@ RCoverage(dataDir="example/bam", outDir="example/coverage", TPM=T,
 }
 
 #### 3) make plots for publication ####
-
 ### plotStacked function:
 ### Data variables
 ## target = [NULL] GRanges object defining specific chromosome, strand, and coordinates
@@ -101,7 +101,6 @@ RCoverage(dataDir="example/bam", outDir="example/coverage", TPM=T,
 #                Note that binning is calculated for the supplied graph width and will not update if the graph is resized
 ## textScaling = [1] text scaling factor. 
 #                Proportionally scales all text, as well as the size of the gene track and group label background
-
 
 
 #### ftsZ ####
