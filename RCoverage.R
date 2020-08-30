@@ -699,15 +699,24 @@ plotStacked <- function(target=NULL, strains=NULL, palette=NULL,
     }
     strandLabel <- sub(" \\(\\*\\)$","",strandLabel)
     
+    #alternative data labeling approach
+    ggStrainInfo <- strainInfo[strainInfo$group==group,c("strain","strainFontFace")]
+    ggStrainInfo$strainFontFace <- strainFontFace
+    ggStrainInfo$strandLabel <- strandLabel
+    ggStrainInfo$strain <- factor(levels(groupData$strain),levels=levels(groupData$strain))
+    
+    levels(groupData$strain)
+    levels(ggStrainInfo$strain)
+    
     ggCov <- 
-      ggplot(data=groupData, mapping=aes(xmin=start, xmax=end, ymin=0, ymax=covMeans, fill=strain)) +
-      geom_rect() +
+      ggplot(data=groupData) +
+      geom_rect(aes(xmin=start, xmax=end, ymin=0,ymax=covMeans, fill=strain)) +
       scale_fill_manual(values = ggPal ) +
-      facet_grid(rows=vars(strain)) +
       scale_x_continuous(expand = c(0,0)) +
       scale_y_continuous(breaks=c(tickTop), limits=c(0,tickTop*1.01)) +
       coord_cartesian(xlim=c(left,right)) +
-      theme_void() +
+      facet_wrap(facets=~strain, dir="v", ncol=1) +
+      theme_grey() +
       theme(
         legend.position = "none",
         strip.background = element_blank(),
@@ -719,24 +728,25 @@ plotStacked <- function(target=NULL, strains=NULL, palette=NULL,
         panel.spacing = unit(c(verticalSpacing),c("null")),
         plot.margin = plotMargin,
         plot.background = element_blank(),
-        panel.background =  element_rect(fill = "grey95") 
+        panel.background =  element_rect(fill = "grey95"),
+        panel.border = element_blank(),
+        panel.grid = element_blank()
       ) +
       labs(x=NULL, y=NULL) +
-      annotate("label", # coverage minimum scale ('0') label 
+      annotate("label", # coverage minimum scale ('0') label
                x=left,
                y=0,
-               label=0, size=2.2*textScaling, hjust=0, vjust=0, label.r=unit(0,"cm"), 
+               label=0, size=2.2*textScaling, hjust=0, vjust=0, label.r=unit(0,"cm"),
                fill="grey95", alpha =0.7, label.size=0, label.padding=unit(c(0.05),"lines")) +
       annotate("label", # coverage maximum scale label
                x=left,
                y=tickTop,
-               label=tickTop, size=2.2*textScaling, hjust=0, vjust=1, label.r=unit(0,"cm"), 
+               label=tickTop, size=2.2*textScaling, hjust=0, vjust=1, label.r=unit(0,"cm"),
                fill="grey95", alpha =0.7, label.size=0, label.padding=unit(c(0.05),"lines")) +
-      annotate("label", # strain / strand label
-               x=right,
-               y=tickTop,
-               label=strandLabel, 
-               size=2.2*textScaling, hjust=1, vjust=1, label.r=unit(0,"cm"), fontface=strainFontFace,
+      geom_label( # strain / strand label
+               data=ggStrainInfo,
+               mapping=aes(x=right, y=tickTop, label=strandLabel, fontface=strainFontFace),
+               size=2.2*textScaling, hjust=1, vjust=1, label.r=unit(0,"cm"),
                fill="grey95", alpha =0.7, label.size=0, label.padding=unit(c(0.05),"lines"))
     ggList[[group]] <- ggplotGrob(ggCov)
   }
@@ -756,7 +766,8 @@ plotStacked <- function(target=NULL, strains=NULL, palette=NULL,
       axis.text.x = element_text(size=7*textScaling, hjust=c(0,1)),
       strip.background = element_blank(),
       plot.background = element_blank(),
-      panel.background = element_blank()) +
+      panel.background = element_blank(),
+      panel.border = element_blank()) +
     labs(x=NULL, y=NULL) +
     annotate("rect", 
              xmin=left, 

@@ -141,11 +141,14 @@ target <- GRanges(seqname="NC_000913.3",
                     end = exons[exons$locus == rna,]$right+500 ), 
                   strand=exons[exons$locus == rna,]$strand )
 
+#set whether groups or strain names appear on the left strip
+labelGroups <- TRUE #TRUE for displaying group names
+
 #for plotting to independent window with a defined size, first make the device
 dev.new(width=width,height=height, unit="in", noRStudioGD = T)
 
 #then run plotStacked to draw the graph
-plotStacked(target = target, strains = strains, labelGroups=T, height = height, width = width)
+plotStacked(target = target, strains = strains, labelGroups=labelGroups, height = height, width = width)
 
 #to save a png:
 # there can be PDF rendering issues on some platforms (macs, at least) if you choose PDF output
@@ -167,8 +170,8 @@ strains <- list(
     "pnp"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
   ),
   "all"=list(
-    "WT"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
-    "pnp"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
+    "pnp"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T),
+    "WT"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T)
   )
 )
 
@@ -280,8 +283,8 @@ plotStacked(target = target, strains = strains, palette = palette, labelGroups=F
 strains <- list(
   "group 1"=list(
     "WT +"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
-    "WT -"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
     "pnp +"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T),
+    "WT -"=list.files("example/coverage/TPM", pattern="KR10000", ignore.case=T, full.names = T),
     "pnp -"=list.files("example/coverage/TPM", pattern="NRD999", ignore.case=T, full.names = T)
   )
 )
